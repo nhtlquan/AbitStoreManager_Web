@@ -1,0 +1,66 @@
+name: Fix Abit auth expiry
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix-auth:
+    if: ${{ !contains(github.event.head_commit.message, '[auth-fix]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch auth expiry handling
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('index.html')
+          s = p.read_text(encoding='utf-8')
+
+          old = '''async function api(path,method="GET",body){const opt={method,headers:{"content-type":"application/json","accept":"application/json, text/plain, */*"}};if(body!==undefined)opt.body=JSON.stringify(body);const sep=path.includes("?")?"&":"?";const u=API+path+(dynamicKey?(sep+"dynamic_key="+encodeURIComponent(dynamicKey)):"");const res=await fetch(u,opt);const text=await res.text();let data={};try{data=JSON.parse(text)}catch{}if(!res.ok)throw new Error(data?.message||data?.error||`HTTP ${res.status}`);return data}'''
+
+          new = '''function forceLogin(message){
+            if(document.getElementById("loginForm"))return;
+            dynamicKey="";
+            localStorage.removeItem("abit_dynamic_key");
+            sessionStorage.removeItem("abit_invoice_status_v1");
+            invoiceStatusMap={};
+            invoiceStatusReady=false;
+            shopMap={};
+            shopMapReady=false;
+            state.seq++;
+            state.loading=false;
+            state.orderLoading=false;
+            loginView(message||"Mã xác thực không còn hợp lệ, vui lòng đăng nhập lại");
+          }
+
+          async function api(path,method="GET",body){const opt={method,headers:{"content-type":"application/json","accept":"application/json, text/plain, */*"}};if(body!==undefined)opt.body=JSON.stringify(body);const sep=path.includes("?")?"&":"?";const u=API+path+(dynamicKey?(sep+"dynamic_key="+encodeURIComponent(dynamicKey)):"");const res=await fetch(u,opt);const text=await res.text();let data={};try{data=JSON.parse(text)}catch{}
+            const authCode=String(data?.error?.code??data?.error?.error_code??data?.code??"");
+            if(authCode==="103"){
+              forceLogin(data?.error?.messsage||data?.error?.message||"Mã xác thực không còn hợp lệ, vui lòng đăng nhập lại");
+              return new Promise(()=>{});
+            }
+            if(!res.ok)throw new Error(data?.message||data?.error?.message||data?.error||`HTTP ${res.status}`);return data}'''
+
+          if old not in s:
+              raise SystemExit('Target api() function not found; aborting without changes')
+
+          if 'function forceLogin(message)' in s:
+              raise SystemExit('Auth expiry fix already present; aborting')
+
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Commit fix and remove one-shot workflow
+        run: |
+          rm -f .github/workflows/fix-auth-expiry.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html .github/workflows/fix-auth-expiry.yml
+          git commit -m "Fix dynamic_key expiry logout [auth-fix]"
+          git push
