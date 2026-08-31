@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rewrites": [
+    {"source":"/api/abit/login","destination":"https://new.abit.vn/api/v1/auth/login"},
+    {"source":"/api/abit/listOrderEcommerce","destination":"https://new.abitstore.vn/invoices/listOrderEcommerce"},
+    {"source":"/api/abit/system/getAllResource","destination":"https://new.abitstore.vn/system/getAllResource"},
+    {"source":"/api/abit/invoices/invoicestatus","destination":"https://new.abitstore.vn/invoices/invoicestatus"}
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "frontend": "index.html",
+  "api_routes": {
+    "POST /api/abit/login": "https://new.abit.vn/api/v1/auth/login",
+    "POST /api/abit/listOrderEcommerce": "https://new.abitstore.vn/invoices/listOrderEcommerce",
+    "GET /api/abit/system/getAllResource": "https://new.abitstore.vn/system/getAllResource",
+    "GET /api/abit/invoices/invoicestatus": "https://new.abitstore.vn/invoices/invoicestatus"
+  }
+}
