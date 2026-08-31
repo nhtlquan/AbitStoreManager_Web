@@ -93,7 +93,28 @@ function img(i){
 }
 function shop(r){return String(r?.store_name||r?.brand||r?.cf_882||"Không xác định").replace(/\s*\(Shopee\)\s*$/i,"")}
 function avatar(r){return SHOP_AVATAR[String(r?.ecommerce_id??r?.ecommerceId??"").trim()]||SHOP_DEFAULT}
-async function api(path,method="GET",body){const opt={method,headers:{"content-type":"application/json","accept":"application/json, text/plain, */*"}};if(body!==undefined)opt.body=JSON.stringify(body);const sep=path.includes("?")?"&":"?";const u=API+path+(dynamicKey?(sep+"dynamic_key="+encodeURIComponent(dynamicKey)):"");const res=await fetch(u,opt);const text=await res.text();let data={};try{data=JSON.parse(text)}catch{}if(!res.ok)throw new Error(data?.message||data?.error||`HTTP ${res.status}`);return data}
+function forceLogin(message){
+  if(document.getElementById("loginForm"))return;
+  dynamicKey="";
+  localStorage.removeItem("abit_dynamic_key");
+  sessionStorage.removeItem("abit_invoice_status_v1");
+  invoiceStatusMap={};
+  invoiceStatusReady=false;
+  shopMap={};
+  shopMapReady=false;
+  state.seq++;
+  state.loading=false;
+  state.orderLoading=false;
+  loginView(message||"Mã xác thực không còn hợp lệ, vui lòng đăng nhập lại");
+}
+
+async function api(path,method="GET",body){const opt={method,headers:{"content-type":"application/json","accept":"application/json, text/plain, */*"}};if(body!==undefined)opt.body=JSON.stringify(body);const sep=path.includes("?")?"&":"?";const u=API+path+(dynamicKey?(sep+"dynamic_key="+encodeURIComponent(dynamicKey)):"");const res=await fetch(u,opt);const text=await res.text();let data={};try{data=JSON.parse(text)}catch{}
+  const authCode=String(data?.error?.code??data?.error?.error_code??data?.code??"");
+  if(authCode==="103"){
+    forceLogin(data?.error?.messsage||data?.error?.message||"Mã xác thực không còn hợp lệ, vui lòng đăng nhập lại");
+    return new Promise(()=>{});
+  }
+  if(!res.ok)throw new Error(data?.message||data?.error?.message||data?.error||`HTTP ${res.status}`);return data}
 function payload(start,end,statuses=[],page=0,limit=100){return[{date_time_start:start,date_time_end:end,invoicestatus:statuses,status_abit_filter:"",pay_method_filter:"",confirm_order:[],nhanvienid:"",packer_name:"",thongtinkhach:"",nguondon:"",typeSearch:"iddonhang",discountType:"",invoicelabel:"all",shop_id:"",invoice_type:"",ngay_confirm:0,ngay_tao:1,ngay_in:0,ngay_gui:0,scanpacked:0,ngay_lay_don:0,ngay_phat_thanh_cong:0,ngay_hoan_don:0,doisoat:"",vanchuyen:[],productcategoryid:"",handle_inv:"",type_emergency:"",storeid:"",warehouseid:"",page,limit,order_by:"",order_type:"",in_don:"all"}]}
 function extract(d){let r=d?.listinvoices||d?.data||[],t=d?.number_invoice||d?.total||d?.total_count||d?.count||0;if(r&&typeof r==="object"&&!Array.isArray(r)){t=r.number_invoice||r.total||r.count||t;r=r.listinvoices||r.items||[]}return[Array.isArray(r)?r:[],Number(t)||0]}
 function loginView(msg=""){root.innerHTML=`<div class="login-page"><form class="login-card" id="loginForm"><div class="logo">S</div><h1>Abit Store Manager</h1><p>Đăng nhập để quản lý đơn hàng và báo cáo</p><label>Tài khoản</label><input id="lu" type="text" autocomplete="username" required><label>Mật khẩu</label><input id="lp" type="password" autocomplete="current-password" required><label class="remember"><input id="lr" type="checkbox" checked>Lưu thông tin đăng nhập</label><button class="login-btn">Đăng nhập</button><p class="err">${esc(msg)}</p></form></div>`;$("loginForm").onsubmit=async e=>{e.preventDefault();const b=e.currentTarget.querySelector("button");b.disabled=true;b.textContent="Đang xác thực...";try{const data=await fetch(API+"/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify([{user_name:$("lu").value.trim(),user_password:$("lp").value,internal_ip:"",external_ip:""}])}).then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d?.message||"Đăng nhập thất bại");return d});if(data?.status!=="success"||!data?.dynamic_key)throw new Error(data?.message||"Đăng nhập thất bại");dynamicKey=data.dynamic_key;
