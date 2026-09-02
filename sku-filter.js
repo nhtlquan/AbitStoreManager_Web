@@ -4,113 +4,38 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const fn=v=>new Intl.NumberFormat('vi-VN').format(Number(v)||0);
 const skuKey=v=>String(v||'').trim().toLowerCase().replace(/[\s_-]+/g,'');
 
-/* Desktop KPI: icon left, title/value stacked, group vertically centered */
-const desktopStyle=document.createElement('style');
-desktopStyle.id='kpiDesktopLayoutOverride';
-desktopStyle.textContent=`@media(min-width:761px){.cards .kpi{min-height:66px!important;height:66px!important;padding:8px 20px!important;display:grid!important;grid-template-columns:28px max-content!important;grid-template-rows:auto auto!important;column-gap:18px!important;row-gap:3px!important;justify-content:start!important;align-content:center!important}.cards .kpi-head{display:contents!important}.cards .kpi-icon{grid-column:1!important;grid-row:1 / span 2!important;width:28px!important;height:28px!important;align-self:center!important}.cards .kpi-title{grid-column:2!important;grid-row:1!important;margin:0!important;padding:0!important;align-self:end!important;white-space:nowrap!important}.cards .kpi-value{grid-column:2!important;grid-row:2!important;margin:0!important;padding:0!important;transform:none!important;align-self:start!important;justify-self:start!important;font-size:24px!important;line-height:1.05!important;white-space:nowrap!important}}`;
-document.head.appendChild(desktopStyle);
+/* Desktop KPI: icon left, title/value stacked, left aligned, vertically centered. */
+const desktopStyle=document.createElement('style');desktopStyle.id='kpiDesktopLayoutOverride';
+desktopStyle.textContent=`@media(min-width:761px){.cards .kpi{min-height:66px!important;height:66px!important;padding:8px 20px!important;display:grid!important;grid-template-columns:28px max-content!important;grid-template-rows:auto auto!important;column-gap:18px!important;row-gap:3px!important;justify-content:start!important;align-content:center!important}.cards .kpi-head{display:contents!important}.cards .kpi-icon{grid-column:1!important;grid-row:1 / span 2!important;width:28px!important;height:28px!important;align-self:center!important}.cards .kpi-title{grid-column:2!important;grid-row:1!important;margin:0!important;padding:0!important;white-space:nowrap!important}.cards .kpi-value{grid-column:2!important;grid-row:2!important;margin:0!important;padding:0!important;transform:none!important;justify-self:start!important;font-size:24px!important;line-height:1.05!important;white-space:nowrap!important}}`;document.head.appendChild(desktopStyle);
 
-function parseMahang(raw){
-  const parts=String(raw??'').split(',').map(x=>x.trim()).filter(Boolean);
-  const out=[];
-  for(const part of parts){
-    const m=part.match(/^\(\s*(\d+)\s*\)\s*(.+?)\s*$/);
-    const qty=m?Math.max(1,Number(m[1])||1):1;
-    const sku=(m?m[2]:part).trim();
-    if(sku)out.push({sku,qty});
-  }
-  return out;
-}
+function parseMahang(raw){return String(raw??'').split(',').map(x=>x.trim()).filter(Boolean).map(part=>{const m=part.match(/^\(\s*(\d+)\s*\)\s*(.+?)\s*$/);return{sku:(m?m[2]:part).trim(),qty:m?Math.max(1,Number(m[1])||1):1}}).filter(x=>x.sku)}
+function rawItems(r){let x=r?.eoi_listproduct;if(!x)return[];try{x=typeof x==='string'?JSON.parse(x):x}catch{return[]}if(x&&typeof x==='object'&&!Array.isArray(x))for(const k of['items','products','list'])if(Array.isArray(x[k])){x=x[k];break}return Array.isArray(x)?x.filter(Boolean):[]}
+function orderProducts(r){const base=rawItems(r),codes=parseMahang(r?.mahang??r?.ma_hang??r?.maHang??r?.sku_list??r?.skuList);const count=Math.max(base.length,codes.length);const out=[];for(let i=0;i<count;i++){const src={...(base[i]||{})};const code=codes[i];if(code){src.sku=code.sku;src.SKU=code.sku;src.mahang=code.sku;src.product_sku=code.sku;src.productSku=code.sku;src.item_sku=code.sku;src.itemSku=code.sku;src.quantity=code.qty;src.qty=code.qty;src.amount=code.qty;src.count=code.qty}else if(!src.quantity&&!src.qty&&!src.amount&&!src.count){src.quantity=1;src.qty=1}out.push(src)}return out}
+function itemSku(i,r){return String(i?.mahang??i?.sku??i?.SKU??i?.product_sku??i?.productSku??i?.item_sku??i?.itemSku??r?.mahang??'').trim()}
+function itemQty(i){const v=i?.quantity??i?.qty??i?.amount??i?.count??1;const n=Number(v);return Number.isFinite(n)&&n>0?n:1}
+function itemName(i){return String(i?.item_name??i?.itemName??i?.product_name??i?.productName??i?.name??'Sản phẩm').trim()||'Sản phẩm'}
+function itemImage(i){const keys=['image_url','imageurl','imageUrl','url','image','thumbnail','thumbnail_url','thumbnailUrl','src','original_image','originalImage','picture','pic','main_image','mainImage'];for(const k of keys){const v=i?.[k];if(typeof v==='string'&&/^https?:\/\//i.test(v))return v.trim();if(v&&typeof v==='object')for(const sk of['url','imageUrl','image_url','src','original','originalUrl','path']){const q=v[sk];if(typeof q==='string'&&/^https?:\/\//i.test(q))return q.trim()}}return''}
 
-function itemImageName(list,index){
-  const src=list[index]||list[list.length-1]||{};
-  return src&&typeof src==='object'?src:{};
-}
-
-/* Make every consumer of items(record) use record.mahang as SKU + quantity. */
-function patchItems(){
-  const original=window.items;
-  if(typeof original!=='function'||original.__mahangPatched)return;
-  function patched(record){
-    const base=original.call(this,record);
-    const codes=parseMahang(record?.mahang??record?.ma_hang??record?.maHang??record?.sku_list??record?.skuList);
-    if(!codes.length)return base;
-    return codes.map((entry,index)=>{
-      const src=itemImageName(base,index);
-      return {...src,
-        sku:entry.sku,
-        SKU:entry.sku,
-        mahang:entry.sku,
-        product_sku:entry.sku,
-        productSku:entry.sku,
-        item_sku:entry.sku,
-        itemSku:entry.sku,
-        quantity:entry.qty,
-        qty:entry.qty,
-        amount:entry.qty,
-        count:entry.qty
-      };
-    });
-  }
-  patched.__mahangPatched=true;
-  patched.__mahangOriginal=original;
-  window.items=patched;
-}
+/* Make report/product consumers receive one item per entry in mahang. */
+function patchItems(){if(typeof window.items!=='function'||window.items.__mahangPatched)return;const original=window.items;function patched(record){const codes=parseMahang(record?.mahang??record?.ma_hang??record?.maHang??record?.sku_list??record?.skuList);if(!codes.length)return original.call(this,record);return orderProducts(record)}patched.__mahangPatched=true;window.items=patched}
 
 function parseApiDate(v){const m=String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})/);return m?new Date(Number(m[1]),Number(m[2])-1,Number(m[3])):null}
 function isSpecialLimitDate(d){if(!(d instanceof Date)||Number.isNaN(d.getTime()))return false;const day=d.getDate(),month=d.getMonth()+1;return day===1||day===10||day===15||day===20||day===25||day===month}
 function rangeHasSpecialLimitDate(start,end){const a=parseApiDate(start),b=parseApiDate(end);if(!a||!b)return false;a.setHours(0,0,0,0);b.setHours(0,0,0,0);if(a>b)return false;const cur=new Date(a);for(let i=0;i<400&&cur<=b;i++,cur.setDate(cur.getDate()+1))if(isSpecialLimitDate(cur))return true;return false}
-function patchPayloadLimit(){if(typeof window.payload!=='function'||window.payload.__specialLimitPatched)return;const original=window.payload;function patched(start,end,statuses,page,limit){const requested=Number(limit)||100;const next=rangeHasSpecialLimitDate(start,end)?Math.max(requested,400):requested;return original.call(this,start,end,statuses,page,next)}patched.__specialLimitPatched=true;window.payload=patched}
+function patchPayloadLimit(){if(typeof window.payload!=='function'||window.payload.__specialLimitPatched)return;const original=window.payload;function patched(start,end,statuses,page,limit){const requested=Number(limit)||100;return original.call(this,start,end,statuses,page,rangeHasSpecialLimitDate(start,end)?Math.max(requested,400):requested)}patched.__specialLimitPatched=true;window.payload=patched}
 
-/* Report grouping now receives SKU and quantity from mahang via patched items(). */
-function patchReport(){
-  if(typeof window.renderReport!=='function'||window.renderReport.__mahangPatched)return;
-  const original=window.renderReport;
-  function patched(...args){patchItems();return original.apply(this,args)}
-  patched.__mahangPatched=true;
-  window.renderReport=patched;
-}
-function patchOrders(){
-  if(typeof window.renderOrders!=='function'||window.renderOrders.__mahangPatched)return;
-  const original=window.renderOrders;
-  function patched(...args){patchItems();return original.apply(this,args)}
-  patched.__mahangPatched=true;
-  window.renderOrders=patched;
-}
+function orderIds(r){return [r?.eoi_order_id,r?.order_id,r?.orderId,r?.invoice_id,r?.invoiceId,r?.eoi_invoice_id,r?.eoi_invoice].filter(v=>v!==undefined&&v!==null&&String(v).trim()).map(v=>String(v).trim())}
+function syncOrderProductCells(){const rows=[...document.querySelectorAll('#ordersList .order-row:not(.head)')];const data=Array.isArray(window.state?.orderRows)?window.state.orderRows:[];for(const r of data){const ids=orderIds(r);if(!ids.length)continue;const row=rows.find(el=>ids.some(id=>el.textContent.includes(id)));if(!row||row.dataset.abitProductsRendered==='1')continue;const cell=row.querySelector('.product-cell');if(!cell)continue;const products=orderProducts(r);if(!products.length)continue;cell.innerHTML=`<div class="abit-product-list">${products.map(it=>{const image=itemImage(it),name=itemName(it),sku=itemSku(it,r),qty=itemQty(it);return `<div class="abit-product-item"><img class="product-img" src="${esc(image)}" onerror="this.onerror=null;this.style.visibility='hidden'"><div class="abit-product-info"><div class="name">${esc(name)}</div><div class="muted">SKU: ${esc(sku||'—')}</div><div class="muted">× ${fn(qty)}</div></div></div>`}).join('')}</div>`;row.dataset.abitProductsRendered='1'}}
+function patchRenderOrders(){if(typeof window.renderOrders!=='function'||window.renderOrders.__multiProductsPatched)return;const original=window.renderOrders;function patched(...args){const result=original.apply(this,args);queueMicrotask(syncOrderProductCells);return result}patched.__multiProductsPatched=true;window.renderOrders=patched}
+function patchReport(){if(typeof window.renderReport!=='function'||window.renderReport.__mahangPatched)return;const original=window.renderReport;function patched(...args){patchItems();return original.apply(this,args)}patched.__mahangPatched=true;window.renderReport=patched}
 
-function css(){
-  if($('skuFilterStyle'))return;
-  const s=document.createElement('style');s.id='skuFilterStyle';
-  s.textContent=`.sku-filter-btn{height:42px;width:42px;min-width:42px;padding:0;border:1px solid #2b4567;border-radius:10px;background:#13243a;color:#dceaff;font-size:19px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:0 0 42px}.sku-filter-btn:hover,.sku-filter-btn.active{background:#1267d9;color:#fff;border-color:#4b8cff}.sku-modal-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(3,9,18,.72);backdrop-filter:blur(5px);display:none;align-items:center;justify-content:center;padding:20px}.sku-modal-backdrop.open{display:flex}.sku-modal{width:min(1080px,100%);max-height:84vh;background:#0f1a2b;border:1px solid #29415f;border-radius:16px;overflow:hidden}.sku-modal-head{display:flex;justify-content:space-between;align-items:center;padding:17px 20px;border-bottom:1px solid #20334d}.sku-modal-title{font-size:18px;font-weight:800}.sku-modal-sub{font-size:11px;color:#8fa3c0;margin-top:4px}.sku-close{width:38px;height:38px;border:1px solid #304763;border-radius:10px;background:#132239;color:#fff;font-size:22px;cursor:pointer}.sku-modal-body{overflow:auto;max-height:65vh}.sku-table{width:100%;border-collapse:collapse}.sku-table th{background:#132239;color:#91a7c2}.sku-table th,.sku-table td{padding:10px 14px;border-bottom:1px solid #1a2c43;text-align:left}.sku-table th:nth-child(n+3),.sku-table td:nth-child(n+3){text-align:right}.sku-product{display:flex;align-items:center;gap:11px}.sku-product-img{width:52px;height:52px;border-radius:8px;object-fit:cover}.profit-rate-colored{font-weight:800}.kpi-value{margin-top:4px!important;padding-left:40px!important}@media(max-width:760px){.orders-head{display:flex!important;align-items:center!important;gap:8px!important}.orders-head .search{flex:1;min-width:0}.sku-modal-backdrop{padding:8px}.sku-modal{width:100%;max-height:100%}.sku-table thead{display:none}.sku-table,.sku-table tbody,.sku-table tr,.sku-table td{display:block;width:100%}.sku-table tr{padding:12px;border-bottom:1px solid #1a2c43}.sku-table td{border:0;padding:4px 0}.sku-table td:nth-child(3)::before{content:'Số lượng SKU: ';color:#7187a3}.sku-table td:nth-child(4)::before{content:'Số lượng đơn: ';color:#7187a3}}`;
-  document.head.appendChild(s);
-}
+function css(){if($('skuFilterStyle'))return;const s=document.createElement('style');s.id='skuFilterStyle';s.textContent=`.abit-product-list{width:100%;display:flex;flex-direction:column;gap:10px}.abit-product-item{display:flex;align-items:center;gap:10px;min-width:0}.abit-product-info{min-width:0;flex:1}.order-row>.product-cell{align-items:flex-start!important}.sku-filter-btn{height:42px;width:42px;min-width:42px;padding:0;border:1px solid #2b4567;border-radius:10px;background:#13243a;color:#dceaff;font-size:19px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:0 0 42px}.sku-filter-btn:hover,.sku-filter-btn.active{background:#1267d9;color:#fff;border-color:#4b8cff}.sku-modal-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(3,9,18,.72);backdrop-filter:blur(5px);display:none;align-items:center;justify-content:center;padding:20px}.sku-modal-backdrop.open{display:flex}.sku-modal{width:min(1080px,100%);max-height:84vh;background:#0f1a2b;border:1px solid #29415f;border-radius:16px;overflow:hidden}.sku-modal-head{display:flex;justify-content:space-between;align-items:center;padding:17px 20px;border-bottom:1px solid #20334d}.sku-modal-title{font-size:18px;font-weight:800}.sku-modal-sub{font-size:11px;color:#8fa3c0;margin-top:4px}.sku-close{width:38px;height:38px;border:1px solid #304763;border-radius:10px;background:#132239;color:#fff;font-size:22px;cursor:pointer}.sku-modal-body{overflow:auto;max-height:65vh}.sku-table{width:100%;border-collapse:collapse}.sku-table th{background:#132239;color:#91a7c2}.sku-table th,.sku-table td{padding:10px 14px;border-bottom:1px solid #1a2c43;text-align:left}.sku-table th:nth-child(n+3),.sku-table td:nth-child(n+3){text-align:right}.sku-product{display:flex;align-items:center;gap:11px}.sku-product-img{width:52px;height:52px;border-radius:8px;object-fit:cover}.profit-rate-colored{font-weight:800}.kpi-value{margin-top:4px!important;padding-left:40px!important}@media(max-width:760px){.orders-head{display:flex!important;align-items:center!important;gap:8px!important}.orders-head .search{flex:1;min-width:0}.sku-modal-backdrop{padding:8px}.sku-modal{width:100%;max-height:100%}.sku-table thead{display:none}.sku-table,.sku-table tbody,.sku-table tr,.sku-table td{display:block;width:100%}.sku-table tr{padding:12px;border-bottom:1px solid #1a2c43}.sku-table td{border:0;padding:4px 0}.sku-table td:nth-child(3)::before{content:'Số lượng SKU: ';color:#7187a3}.sku-table td:nth-child(4)::before{content:'Số lượng đơn: ';color:#7187a3}.abit-product-item{align-items:flex-start}}`;document.head.appendChild(s)}
 
-function summary(){
-  const rows=[...document.querySelectorAll('#ordersList .order-row:not(.head)')],m=new Map();
-  for(const row of rows){
-    const p=row.querySelector('.product-cell');if(!p)continue;
-    const t=[...p.querySelectorAll('.muted')].map(x=>x.textContent.trim());
-    const z=t.find(x=>/^SKU\s*:/i.test(x))||'';
-    const sku=z.replace(/^SKU\s*:\s*/i,'').trim();
-    if(!sku||sku==='—')continue;
-    const name=(p.querySelector('.name')?.textContent||'Sản phẩm').trim();
-    const image=p.querySelector('img')?.src||'';
-    const qm=(t.find(x=>/×/.test(x))||'').match(/×\s*([\d.,]+)/);
-    const qty=qm?Number(qm[1].replace(/\./g,'').replace(',','.')):1;
-    const oid=(row.querySelectorAll('.cell')[4]?.textContent||'').trim();
-    const key=skuKey(sku);let x=m.get(key);
-    if(!x)x={sku,name,image,qty:0,orders:new Set()};
-    x.qty+=Number.isFinite(qty)&&qty>0?qty:1;
-    if(oid&&oid!=='—')x.orders.add(oid);m.set(key,x);
-  }
-  return{rows:[...m.values()].sort((a,b)=>b.qty-a.qty||b.orders.size-a.orders.size),count:rows.length};
-}
-function renderSku(){const b=$('skuModalBody');if(!b)return;const r=summary();$('skuModalSub').textContent=`Từ ${fn(r.count)} đơn đang hiển thị`;$('skuModalFoot').textContent=`${fn(r.rows.length)} SKU`;b.innerHTML=r.rows.length?`<table class="sku-table"><thead><tr><th>Ảnh, Tên SP</th><th>Mã SKU</th><th>Số lượng SKU</th><th>Số lượng đơn</th></tr></thead><tbody>${r.rows.map(x=>`<tr><td><div class="sku-product">${x.image?`<img class="sku-product-img" src="${esc(x.image)}">`:''}<div>${esc(x.name)}</div></div></td><td>${esc(x.sku)}</td><td>${fn(x.qty)}</td><td>${fn(x.orders.size)}</td></tr>`).join('')}</tbody></table>`:'<div style="padding:48px;text-align:center;color:#8fa3c0">Không tìm thấy SKU trong danh sách đơn hàng hiện tại.</div>'}
+function summary(){const rows=[...document.querySelectorAll('#ordersList .order-row:not(.head)')],m=new Map();for(const row of rows){const oid=[...row.querySelectorAll('.cell')].map(x=>x.textContent.trim()).find(Boolean)||'';for(const p of row.querySelectorAll('.abit-product-item')){const sku=(p.querySelector('.muted')?.textContent||'').replace(/^SKU\s*:\s*/i,'').trim();if(!sku||sku==='—')continue;const muted=[...p.querySelectorAll('.muted')].map(x=>x.textContent.trim());const qm=(muted.find(x=>/×/.test(x))||'').match(/×\s*([\d.,]+)/);const qty=qm?Number(qm[1].replace(/\./g,'').replace(',','.')):1;const name=(p.querySelector('.name')?.textContent||'Sản phẩm').trim(),image=p.querySelector('img')?.src||'',key=skuKey(sku);let x=m.get(key);if(!x)x={sku,name,image,qty:0,orders:new Set()};x.qty+=Number.isFinite(qty)&&qty>0?qty:1;if(oid)x.orders.add(oid);m.set(key,x)}}return{rows:[...m.values()].sort((a,b)=>b.qty-a.qty||b.orders.size-a.orders.size),count:rows.length}}
+function renderSku(){const b=$('skuModalBody');if(!b)return;syncOrderProductCells();const r=summary();$('skuModalSub').textContent=`Từ ${fn(r.count)} đơn đang hiển thị`;$('skuModalFoot').textContent=`${fn(r.rows.length)} SKU`;b.innerHTML=r.rows.length?`<table class="sku-table"><thead><tr><th>Ảnh, Tên SP</th><th>Mã SKU</th><th>Số lượng SKU</th><th>Số lượng đơn</th></tr></thead><tbody>${r.rows.map(x=>`<tr><td><div class="sku-product">${x.image?`<img class="sku-product-img" src="${esc(x.image)}">`:''}<div>${esc(x.name)}</div></div></td><td>${esc(x.sku)}</td><td>${fn(x.qty)}</td><td>${fn(x.orders.size)}</td></tr>`).join('')}</tbody></table>`:'<div style="padding:48px;text-align:center;color:#8fa3c0">Không tìm thấy SKU trong danh sách đơn hàng hiện tại.</div>'}
 function install(){const h=document.querySelector('.orders-head');if(!h)return;if(!$('skuFilterBtn')){const b=document.createElement('button');b.type='button';b.id='skuFilterBtn';b.className='sku-filter-btn';b.title='Lọc SKU';b.textContent='▦';b.onclick=()=>{const m=$('skuModal');if(m){m.classList.add('open');renderSku()}};h.appendChild(b)}if(!$('skuModal')){const w=document.createElement('div');w.id='skuModal';w.className='sku-modal-backdrop';w.innerHTML='<div class="sku-modal"><div class="sku-modal-head"><div><div class="sku-modal-title">Lọc SKU</div><div class="sku-modal-sub" id="skuModalSub"></div></div><button type="button" class="sku-close" id="skuClose">×</button></div><div class="sku-modal-body" id="skuModalBody"></div><div style="padding:10px 16px;color:#7489a4;font-size:11px" id="skuModalFoot"></div></div>';document.body.appendChild(w);$('skuClose').onclick=()=>w.classList.remove('open');w.onclick=e=>{if(e.target===w)w.classList.remove('open')}}}
 function paintRates(){for(const row of document.querySelectorAll('#ordersList .order-row:not(.head)'))for(const cell of row.querySelectorAll('.cell')){if(cell.dataset.ratePainted==='1')continue;const m=(cell.textContent||'').match(/(-?\d+(?:[.,]\d+)?)\s*%/);if(!m)continue;const v=Number(m[1].replace(',','.'));if(!Number.isFinite(v))continue;const c=v<11?'#ff4d67':v<14?'#ffb020':v<=16?'#3478f6':'#2ccf93';cell.innerHTML=cell.innerHTML.replace(m[0],`<span class="profit-rate-colored" style="color:${c}">${m[0]}</span>`);cell.dataset.ratePainted='1'}}
 
-css();patchItems();patchPayloadLimit();patchReport();patchOrders();
-const ob=new MutationObserver(()=>{install();paintRates();patchItems();patchPayloadLimit();patchReport();patchOrders()});
-ob.observe(document.documentElement,{childList:true,subtree:true});install();paintRates();
-setInterval(()=>{patchItems();patchPayloadLimit();patchReport();patchOrders()},250);
+css();patchItems();patchPayloadLimit();patchReport();patchRenderOrders();
+const ob=new MutationObserver(()=>{install();paintRates();patchItems();patchPayloadLimit();patchReport();patchRenderOrders();syncOrderProductCells()});ob.observe(document.documentElement,{childList:true,subtree:true});install();paintRates();setInterval(()=>{patchItems();patchPayloadLimit();patchReport();patchRenderOrders();syncOrderProductCells()},250);
 })();
