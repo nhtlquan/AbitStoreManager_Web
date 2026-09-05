@@ -17,3 +17,41 @@ function summary(){sync();const m=new Map;for(const row of document.querySelecto
 function modal(){let w=$('skuModal');if(w)return w;w=document.createElement('div');w.id='skuModal';w.className='sku-modal-backdrop';w.innerHTML='<div class="sku-modal"><div class="sku-modal-head"><div><div class="sku-modal-title">Lọc SKU</div><div class="sku-modal-sub" id="skuModalSub"></div></div><button class="sku-close">×</button></div><div class="sku-modal-body" id="skuModalBody"></div></div>';document.body.appendChild(w);w.querySelector('.sku-close').onclick=()=>w.classList.remove('open');w.onclick=e=>{if(e.target===w)w.classList.remove('open')};return w}function showSku(){const w=modal(),a=summary();$('skuModalSub').textContent=`${fn(a.length)} SKU`;$('skuModalBody').innerHTML=a.length?`<table class="sku-table"><thead><tr><th>Ảnh, Tên SP</th><th>Mã SKU</th><th>Số lượng SKU</th><th>Số lượng đơn</th></tr></thead><tbody>${a.map(x=>`<tr><td><div class="sku-product">${x.image?`<img class="sku-product-img" src="${esc(x.image)}">`:''}<div>${esc(x.name)}</div></div></td><td>${esc(x.sku)}</td><td>${fn(x.qty)}</td><td>${fn(x.orders.size)}</td></tr>`).join('')}</tbody></table>`:'<div style="padding:48px;text-align:center">Không tìm thấy SKU trong danh sách đơn hàng hiện tại.</div>';w.classList.add('open')}function install(){const h=document.querySelector('.orders-head');if(h&&!$('skuFilterBtn')){const b=document.createElement('button');b.id='skuFilterBtn';b.className='sku-filter-btn';b.textContent='▦';b.title='Lọc SKU';b.onclick=showSku;h.appendChild(b)}}
 function rates(){for(const c of document.querySelectorAll('#ordersList .cell'))if(!c.dataset.rate){const m=c.textContent.match(/(-?\d+(?:[.,]\d+)?)\s*%/);if(!m)continue;const v=+m[1].replace(',','.');const color=v<11?'#ff4d67':v<14?'#ffb020':v<=16?'#3478f6':'#2ccf93';c.innerHTML=c.innerHTML.replace(m[0],`<span class="profit-rate-colored" style="color:${color}">${m[0]}</span>`);c.dataset.rate=1}}
 logo();patchItems();patchLimit();patchRender();install();sync();rates();new MutationObserver(()=>{logo();patchItems();patchLimit();patchRender();install();sync();rates()}).observe(document.documentElement,{childList:true,subtree:true});setInterval(()=>{logo();patchItems();patchLimit();patchRender();sync()},500)})();
+
+(()=>{'use strict';
+  const isReturned=r=>String(r?.invoicestatus??r?.invoiceStatus??'').trim().toLowerCase().replace(/[\s_]+/g,'')==='chuyenhoan';
+  const isExcludedReturned=r=>isReturned(r)&&String(r?.doisoathoan??r?.doi_soat_hoan??r?.doiSoatHoan??'').trim()==='2';
+  function patchReturnFilter(){
+    if(typeof window.renderReport==='function'&&!window.renderReport.__returnSettlementFilter){
+      const original=window.renderReport;
+      function wrapped(rows,...args){
+        const result=original.call(this,rows,...args);
+        const validRows=Array.isArray(rows)?rows.filter(r=>!isExcludedReturned(r)):[];
+        const el=document.getElementById('k_returned');
+        if(el)el.textContent=new Intl.NumberFormat('vi-VN').format(validRows.filter(isReturned).length);
+        return result;
+      }
+      wrapped.__returnSettlementFilter=true;
+      window.renderReport=wrapped;
+    }
+    if(typeof window.loadOrders==='function'&&!window.loadOrders.__returnSettlementFilter){
+      const original=window.loadOrders;
+      async function wrapped(...args){
+        const result=await original.apply(this,args);
+        if(typeof state!=='undefined'&&Array.isArray(state.orderRows)){
+          const before=state.orderRows.length;
+          state.orderRows=state.orderRows.filter(r=>!isExcludedReturned(r));
+          const removed=before-state.orderRows.length;
+          if(removed&&typeof state.orderTotal==='number')state.orderTotal=Math.max(0,state.orderTotal-removed);
+          if(typeof window.renderOrders==='function')window.renderOrders();
+        }
+        return result;
+      }
+      wrapped.__returnSettlementFilter=true;
+      window.loadOrders=wrapped;
+    }
+  }
+  patchReturnFilter();
+  new MutationObserver(patchReturnFilter).observe(document.documentElement,{childList:true,subtree:true});
+  setInterval(patchReturnFilter,500);
+})();
